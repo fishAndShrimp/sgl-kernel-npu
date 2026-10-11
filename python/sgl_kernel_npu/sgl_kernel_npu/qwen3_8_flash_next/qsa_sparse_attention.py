@@ -14,6 +14,34 @@ _GROUP_MODEL = True
 
 
 @triton.jit
+def _active_slot_tiles(
+    Slots,
+    row,
+    split,
+    SLOT_ROW: tl.constexpr,
+    SLOT_COL: tl.constexpr,
+    WIDTH: tl.constexpr,
+    TILES: tl.constexpr,
+    BLOCK: tl.constexpr,
+):
+    # Find the last live column in this split, without assuming a valid prefix.
+    # Reading current device data keeps the bound correct on every graph replay.
+    last_valid = tl.full((), 0, tl.int32)
+    scan = tl.full((), (TILES * BLOCK + 255) // 256 - 1, tl.int32)
+    while (scan >= 0) & (last_valid == 0):
+        offsets = scan * 256 + tl.arange(0, 256)
+        columns = split.to(tl.int64) * TILES * BLOCK + offsets.to(tl.int64)
+        slots = tl.load(
+            Slots + row * SLOT_ROW + columns.to(tl.int64) * SLOT_COL,
+            (columns < WIDTH) & (offsets < TILES * BLOCK),
+            other=-1,
+        )
+        last_valid = tl.max(tl.where(slots >= 0, offsets + 1, 0), 0)
+        scan -= 1
+    return tl.cdiv(last_valid, BLOCK)
+
+
+@triton.jit
 def _sparse_partials(
     Q,
     K,
@@ -57,7 +85,10 @@ def _sparse_partials(
     maximum = tl.full((), -float("inf"), tl.float32)
     total = tl.full((), 0, tl.float32)
     numerator = tl.full((DIM,), 0, tl.float32)
-    for tile in range(TILES):
+    active_tiles = _active_slot_tiles(
+        Slots, row, split, SLOT_ROW, SLOT_COL, WIDTH, TILES, BLOCK
+    )
+    for tile in range(active_tiles):
         base = split * TILES + tile
         if WIDE_OFFSETS:
             base = base.to(tl.int64)
@@ -203,26 +234,9 @@ def _grouped_partials(
     a0 = tl.full((DIM,), 0, tl.float32)
     a1 = tl.full((DIM,), 0, tl.float32)
     a2 = tl.full((DIM,), 0, tl.float32)
-    if SPLITS == 1:
-        # Locate the last live slot without assuming a valid prefix.
-        # Every replay reads current slots, including fully padded rows.
-        last_valid = tl.full((), 0, tl.int32)
-        scan = tl.full((), (TILES * BLOCK + 255) // 256 - 1, tl.int32)
-        while (scan >= 0) & (last_valid == 0):
-            offsets = scan * 256 + tl.arange(0, 256)
-            scan_cols = split * TILES * BLOCK + offsets
-            scan_slots = tl.load(
-                Slots + row * SLOT_ROW + scan_cols * SLOT_COL,
-                (scan_cols < WIDTH) & (offsets < TILES * BLOCK),
-                other=-1,
-            )
-            last_valid = tl.maximum(
-                last_valid, tl.max(tl.where(scan_slots >= 0, offsets + 1, 0), 0)
-            )
-            scan -= 1
-        active_tiles = tl.cdiv(last_valid, BLOCK)
-    else:
-        active_tiles = TILES
+    active_tiles = _active_slot_tiles(
+        Slots, row, split, SLOT_ROW, SLOT_COL, WIDTH, TILES, BLOCK
+    )
     for tile in range(active_tiles):
         cols = (split * TILES + tile) * BLOCK + tl.arange(0, BLOCK)
         slots = tl.load(
@@ -599,11 +613,10 @@ def sparse_attention(q, k, v, slots, softmax_scale=None):
     write output directly; otherwise store FP32 maximum, normalizer and a
     256-element weighted numerator for each (query row, head, split).
 
-    Direct three-head reuse scans live slots backward in bounded blocks to locate
-    the final valid selection. Only the verified padding suffix is excluded.
-    Split paths retain their full tile range. In either path, entirely padded
-    tiles skip K/V and softmax updates;
-    later valid tiles, internal holes and graph slot updates remain supported.
+    Triton paths scan live slots backward in bounded blocks within each split
+    to locate its final valid selection. Only verified padding suffixes are
+    excluded; later valid tiles, internal holes and graph slot updates remain
+    supported. Three-head reuse also skips entirely padded internal tiles.
 
     Flatten query rows and heads into R*Hq items. Each launch handles at most
     floor(65535/L) items, rounded down to a multiple of three for reuse.

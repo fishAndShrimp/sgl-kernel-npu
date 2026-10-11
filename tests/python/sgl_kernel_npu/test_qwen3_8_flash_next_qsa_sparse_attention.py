@@ -356,3 +356,39 @@ def test_direct_scan_boundaries_widths_and_graph_updates(rows, width, gaps):
         outputs, before = _run_pair(impl, args, graph, graph_output, pointers)
         for out in outputs:
             _check_finite(out, expected, before[3])
+
+
+@pytest.mark.parametrize("splits", [1, 2, 8, 16])
+@pytest.mark.parametrize("wide", [False, True])
+@pytest.mark.parametrize("heads,kv_heads", [(3, 1), (6, 1), (12, 1), (24, 2)])
+def test_split_live_bounds_replay_holes_and_empty_partitions(
+    splits, wide, heads, kv_heads, monkeypatch
+):
+    # Overrides exercise each Triton layout without changing production dispatch.
+    monkeypatch.setattr(impl, "_CONFIG_OVERRIDE", (32, splits))
+    monkeypatch.setattr(impl, "_FORCE_WIDE", wide)
+    q, k, v, slots = inputs(rows=4, heads=heads, kv_heads=kv_heads, gaps=True)
+    slots.fill_(-1)
+    args = q, k, v, slots
+    impl.sparse_attention(*args)
+    torch.npu.synchronize()
+    graph = torch.npu.NPUGraph()
+    with torch.npu.graph(graph):
+        graph_output = impl.sparse_attention(*args)
+    # Move the final live entry across tile/split boundaries in both directions.
+    for last in [None, 0, 31, 32, 255, 256, 1023, 1024, 2050, 17, None]:
+        host = torch.full((4, 2051), -1, dtype=torch.int32)
+        if last is not None:
+            for col in {0, last}:
+                host[1:, col] = torch.tensor([1, 7, 19])
+            # Repeat one key, preserving its repeated softmax contribution.
+            if last > 2:
+                host[1:, 2] = host[1:, 0]
+        slots.copy_(host)
+        graph.replay()
+        eager = impl.sparse_attention(*args)
+        torch.npu.synchronize()
+        expected = oracle(*args)
+        for actual in [graph_output, eager]:
+            torch.testing.assert_close(actual.cpu(), expected, atol=0.02, rtol=0.02)
+            assert torch.equal(actual[0], torch.zeros_like(actual[0]))
