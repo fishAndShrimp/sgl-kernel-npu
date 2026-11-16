@@ -21,8 +21,8 @@ def _grid(tensor, tasks):
     return (min(tasks, _vector_cores(tensor.device.index)),)
 
 
-@triton.jit
-def _mix(X, G, Y, ROWS: tl.constexpr, BLOCK: tl.constexpr):
+@triton.jit(do_not_specialize=["ROWS"])
+def _mix(X, G, Y, ROWS, BLOCK: tl.constexpr):
     head = tl.arange(0, 4)
     for task in range(
         tl.program_id(0), ROWS * tl.cdiv(2560, BLOCK), tl.num_programs(0)
@@ -36,8 +36,8 @@ def _mix(X, G, Y, ROWS: tl.constexpr, BLOCK: tl.constexpr):
         tl.store(Y + row * 2560 + col, y, col < 2560)
 
 
-@triton.jit
-def _combine(B, R, G, Y, ROWS: tl.constexpr, BLOCK: tl.constexpr):
+@triton.jit(do_not_specialize=["ROWS"])
+def _combine(B, R, G, Y, ROWS, BLOCK: tl.constexpr):
     head = tl.arange(0, 4)
     for task in range(
         tl.program_id(0), ROWS * tl.cdiv(2560, BLOCK), tl.num_programs(0)
@@ -60,8 +60,8 @@ ROW_BLOCK = 4096
 DIRECT_ROWS = 2 * ROW_BLOCK
 
 
-def _mix_project(x, down32, up32, out):
-    hidden = F.linear(x.float(), down32)
+def _mix_project(x, down, up32, out):
+    hidden = torch.mm(x, down.T, out_dtype=torch.float32)
     scaled = hidden * 0.25
     activated = fused_sigmoid_mul(scaled, scaled)
     gates = F.linear(activated, up32)
@@ -71,9 +71,9 @@ def _mix_project(x, down32, up32, out):
 
 
 def mix(x, down, up, hc, hs):
-    # Native GEMMs retain FP32 intermediates. Converted weights belong to this
-    # invocation, so graph replay observes in-place updates at stable addresses.
-    hidden = F.linear(x.float(), down.float())
+    # BF16 inputs produce FP32 projections without converting the inputs.
+    # Graph replay reads the current weights at their original addresses.
+    hidden = torch.mm(x, down.T, out_dtype=torch.float32)
     scaled = hidden * 0.25
     activated = fused_sigmoid_mul(scaled, scaled)
     gates = F.linear(activated, up.float())
@@ -87,22 +87,22 @@ def mix(x, down, up, hc, hs):
 def mix_chunked(x, down, up, hc, hs):
     out = x.new_empty((x.shape[0], hs))
     # Per-call conversions remain in the graph; no stale transformed weights.
-    down32, up32 = down.float(), up.float()
+    up32 = up.float()
     for start in range(0, x.shape[0], ROW_BLOCK):
         stop = min(start + ROW_BLOCK, x.shape[0])
-        _mix_project(x[start:stop], down32, up32, out[start:stop])
+        _mix_project(x[start:stop], down, up32, out[start:stop])
     return out
 
 
-def _combine_project(block, residual, normed, weight32, out):
-    gates = F.linear(normed.float(), weight32)
+def _combine_project(block, residual, normed, weight, out):
+    gates = torch.mm(normed, weight.T, out_dtype=torch.float32)
     _combine[_grid(residual, residual.shape[0] * 5)](
         block, residual, gates, out, residual.shape[0], 512, enable_fp_fusion=False
     )
 
 
 def combine(block, residual, normed, weight, hc, hs):
-    gates = F.linear(normed.float(), weight.float())
+    gates = torch.mm(normed, weight.T, out_dtype=torch.float32)
     y = torch.empty_like(residual)
     _combine[_grid(residual, residual.shape[0] * 5)](
         block, residual, gates, y, residual.shape[0], 512, enable_fp_fusion=False
@@ -112,14 +112,13 @@ def combine(block, residual, normed, weight, hc, hs):
 
 def combine_chunked(block, residual, normed, weight, hc, hs):
     out = torch.empty_like(residual)
-    weight32 = weight.float()
     for start in range(0, residual.shape[0], ROW_BLOCK):
         stop = min(start + ROW_BLOCK, residual.shape[0])
         _combine_project(
             block[start:stop],
             residual[start:stop],
             normed[start:stop],
-            weight32,
+            weight,
             out[start:stop],
         )
     return out
