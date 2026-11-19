@@ -1,5 +1,6 @@
 """HC mix/combine with FP32 projections and Triton gates."""
 
+import os
 from functools import lru_cache
 
 import torch
@@ -70,13 +71,35 @@ def _mix_project(x, down, up32, out):
     )
 
 
+@lru_cache(None)
+def _up_cast_stream(device):
+    return torch.npu.Stream(device=device)
+
+
 def mix(x, down, up, hc, hs):
     # BF16 inputs produce FP32 projections without converting the inputs.
     # Graph replay reads the current weights at their original addresses.
+    overlap_cast = False
+    if x.shape[0] <= 512 and os.getenv("SGLANG_NPU_HC_OVERLAP_UP_CAST") == "1":
+        from ....operators.utils.generation import Generation, get_hardware
+
+        overlap_cast = get_hardware().generation is Generation.ARCH22
+    if overlap_cast:
+        # See weight updates from before this HC call on the producer stream.
+        main = torch.npu.current_stream(x.device)
+        cast_stream = _up_cast_stream(x.device)
+        cast_stream.wait_stream(main)
+        with torch.npu.stream(cast_stream):
+            up32 = up.float()
     hidden = torch.mm(x, down.T, out_dtype=torch.float32)
     scaled = hidden * 0.25
     activated = fused_sigmoid_mul(scaled, scaled)
-    gates = F.linear(activated, up.float())
+    if overlap_cast:
+        main.wait_stream(cast_stream)
+        up32.record_stream(main)
+    else:
+        up32 = up.float()
+    gates = F.linear(activated, up32)
     y = x.new_empty((x.shape[0], 2560))
     _mix[_grid(x, x.shape[0] * 10)](
         x, gates, y, x.shape[0], 256, enable_fp_fusion=False
