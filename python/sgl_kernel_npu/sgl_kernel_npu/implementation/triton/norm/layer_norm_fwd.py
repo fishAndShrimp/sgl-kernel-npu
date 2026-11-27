@@ -35,6 +35,7 @@ def _layer_norm_fwd_1pass_kernel_npu(
     NORM_BEFORE_GATE: tl.constexpr,
     IS_RMS_NORM: tl.constexpr,
     SIGMOID_GATE: tl.constexpr = False,
+    GEMMA_WEIGHT: tl.constexpr = False,
 ):
     # Map the program id to the row of X and Y it should compute.
     pid_m = tl.program_id(0)
@@ -50,6 +51,8 @@ def _layer_norm_fwd_1pass_kernel_npu(
     cols = tl.arange(0, BLOCK_N)
     col_mask = cols < N
     w = tl.load(W + cols, mask=col_mask).to(tl.float32)
+    if GEMMA_WEIGHT:
+        w += 1.0
     if HAS_BIAS:
         b = tl.load(B + cols, mask=col_mask).to(tl.float32)
 

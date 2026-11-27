@@ -28,8 +28,6 @@ def grouped_gemma_rmsnorm(x, weight, group_size, eps):
     if rows == 0:
         return out
     groups = hidden // group_size
-    # Convert inside each invocation so graph replay sees weight updates.
-    effective_weight = weight.float() + 1.0
     rstd = torch.empty(groups * rows, dtype=torch.float32, device=x.device)
 
     # Width 2560 pads to 4096. Four rows exceed arch22 UB; two rows fit.
@@ -40,7 +38,7 @@ def grouped_gemma_rmsnorm(x, weight, group_size, eps):
     _layer_norm_fwd_1pass_kernel_npu[grid](
         x,
         out,
-        effective_weight,
+        weight,
         None,  # no bias
         None,  # no gate
         None,  # RMSNorm does not produce means
@@ -55,5 +53,6 @@ def grouped_gemma_rmsnorm(x, weight, group_size, eps):
         BLOCK_N=block_n,
         NORM_BEFORE_GATE=True,
         IS_RMS_NORM=True,
+        GEMMA_WEIGHT=True,
     )
     return out
