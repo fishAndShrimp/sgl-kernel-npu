@@ -27,7 +27,14 @@ def _dimensions(hc, hs):
 
 def mix(x, down, up, hc, hs):
     _dimensions(hc, hs)
-    _tensors((x, down, up))
+    _tensors((x, down))
+    if (
+        not isinstance(up, torch.Tensor)
+        or up.device != x.device
+        or up.dtype not in (torch.bfloat16, torch.float32)
+        or not up.is_contiguous()
+    ):
+        raise ValueError("Expected contiguous BF16 or FP32 up weight on the input NPU")
     if (
         x.ndim != 2
         or x.shape[1] != 10240
