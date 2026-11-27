@@ -207,6 +207,12 @@
 | [qsa_topk](operators/indexer/qsa_topk.md) | `triton`, `torch_native` |
 | [expand_qsa_blocks](operators/indexer/expand_qsa_blocks.md) | `triton`, `torch_native` |
 | [qsa_sparse_attention](operators/attention/qsa_sparse_attention.md) | `triton`, `torch_native` |
+| [qsa_rmsnorm_mrope](operators/norm/qsa_rmsnorm_mrope.md) | `triton`, `torch_native` |
+| [qsa_compress_group_slots](operators/indexer/qsa_compress_group_slots.md) | `triton`, `torch_native` |
+| [qsa_store_cache_rows](operators/mem_cache/qsa_store_cache_rows.md) | `triton`, `torch_native` |
+| [build_qsa_fia_mask](operators/attention/build_qsa_fia_mask.md) | `triton`, `torch_native` |
+| [copy_qsa_fia_output](operators/attention/copy_qsa_fia_output.md) | `triton`, `torch_native` |
+| [qsa_sort_count_groups](operators/attention/qsa_sort_count_groups.md) | `triton`, `torch_native` |
 | [grouped_gemma_rmsnorm](operators/norm/grouped_gemma_rmsnorm.md) | `triton`, `torch_native` |
 | [hc_mix](operators/hyper_conn/hc_mix.md) | `triton`, `torch_native` |
 | [hc_combine](operators/hyper_conn/hc_combine.md) | `triton`, `torch_native` |

@@ -14,6 +14,7 @@ from .mlp_lightning_indexer import mlp_lightning_indexer
 from .pack_pool_key_indexer_indices import pack_pool_key_indexer_indices
 from .pool_key_indexer import pool_key_indexer
 from .prepare_pool_key_indexer_inputs import prepare_pool_key_indexer_inputs
+from .qsa_compress_group_slots import qsa_compress_group_slots
 from .qsa_expansion import expand_qsa_blocks
 from .qsa_mqa import qsa_mqa_packed, qsa_mqa_paged
 from .qsa_topk import qsa_topk
@@ -55,6 +56,7 @@ __all__ = [
     "quant_lightning_indexer_metadata",
     "get_quant_lightning_indexer_metadata_size",
     "quant_lightning_indexer",
+    "qsa_compress_group_slots",
     "qsa_mqa_packed",
     "qsa_mqa_paged",
     "qsa_topk",

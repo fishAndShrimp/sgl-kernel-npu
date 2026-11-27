@@ -4,8 +4,10 @@ from .ada_block_sparse_attention import ada_block_sparse_attention
 from .attention_sinks import attention_sinks
 from .attention_sinks_prefill import attention_sinks_prefill
 from .attention_update import attention_update
+from .build_qsa_fia_mask import QSAFIAMaskWorkspace, build_qsa_fia_mask
 from .compressor import compressor
 from .compressor_v2 import compressor_v2
+from .copy_qsa_fia_output import copy_qsa_fia_output
 from .fia_prep import fia_prep
 from .flash_decode_bnsd_with_gqa_share_sparse import (
     flash_decode_bnsd_with_gqa_share_sparse,
@@ -45,6 +47,7 @@ from .mla_prolog_v3 import mla_prolog_v3
 from .mlaprolog_v4 import mlaprolog_v4
 from .paged_attention import flash_attention_qlens, paged_attention, paged_attention_mla
 from .paged_mtp_attention import paged_mtp_attention_decode
+from .qsa_sort_count_groups import qsa_sort_count_groups
 from .qsa_sparse_attention import qsa_sparse_attention
 from .quant_flash_attn import quant_flash_attn
 from .quant_flash_attn_metadata import quant_flash_attn_metadata
@@ -59,13 +62,16 @@ from .sparse_flash_mla_metadata import (
 )
 
 __all__ = [
+    "QSAFIAMaskWorkspace",
     "ada_block_sparse_attention",
     "attention_sinks",
     "attention_sinks_prefill",
     "attention_update",
+    "build_qsa_fia_mask",
     "chunk_kda_fwd",
     "compressor",
     "compressor_v2",
+    "copy_qsa_fia_output",
     "fia_prep",
     "flash_attention_qlens",
     "flash_decode_bnsd_with_gqa_share_sparse",
@@ -96,6 +102,7 @@ __all__ = [
     "paged_attention",
     "paged_attention_mla",
     "paged_mtp_attention_decode",
+    "qsa_sort_count_groups",
     "qsa_sparse_attention",
     "quant_flash_attn",
     "quant_flash_attn_metadata",
